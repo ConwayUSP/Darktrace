@@ -11,6 +11,7 @@
         [HideInInspector] _StencilReadMask ("Stencil Read Mask", Float) = 255
         [HideInInspector] _ColorMask ("Color Mask", Float) = 15
         [HideInInspector] _UseUIAlphaClip ("Use Alpha Clip", Float) = 0
+        [HideInInspector] _ClipRect ("Clip Rect", Vector) = (-32767, -32767, 32767, 32767)
         // Definition in Properties section is required to Mask works properly
         _r ("r", Vector) = (0,0,0,0)
         _halfSize ("halfSize", Vector) = (0,0,0,0)
@@ -40,25 +41,61 @@
         
         Blend SrcAlpha OneMinusSrcAlpha
         ZWrite Off
-
         Pass {
             CGPROGRAM
             
             #include "UnityCG.cginc"
+            #include "UnityUI.cginc"
             #include "SDFUtils.cginc"
             #include "ShaderSetup.cginc"
             
             #pragma vertex vert
             #pragma fragment frag
             
+            #pragma multi_compile_local _ UNITY_UI_CLIP_RECT
+            #pragma multi_compile_local _ UNITY_UI_ALPHACLIP
+            
             float4 _r;
             float4 _halfSize;
             float4 _rect2props;
+            float4 _ClipRect;
             sampler2D _MainTex;
             
-            fixed4 frag (v2f i) : SV_Target {
+            struct appdata_custom {
+                float4 vertex : POSITION;
+                float2 uv : TEXCOORD0;
+                float4 color : COLOR;
+            };
+            
+            struct v2f_custom {
+                float4 vertex : SV_POSITION;
+                float2 uv : TEXCOORD0;
+                float4 color : COLOR;
+                float4 worldPosition : TEXCOORD1;
+            };
+            
+            v2f_custom vert (appdata_custom v) {
+                v2f_custom o;
+                o.worldPosition = v.vertex;
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.uv = v.uv;
+                o.color = v.color;
+                return o;
+            }
+            
+            fixed4 frag (v2f_custom i) : SV_Target {
                 float alpha = CalcAlphaForIndependentCorners(i.uv, _halfSize.xy, _rect2props, _r);
-                return mixAlpha(tex2D(_MainTex, i.uv), i.color, alpha);
+                fixed4 color = mixAlpha(tex2D(_MainTex, i.uv), i.color, alpha);
+                
+                #ifdef UNITY_UI_CLIP_RECT
+                color.a *= UnityGet2DClipping(i.worldPosition.xy, _ClipRect);
+                #endif
+                
+                #ifdef UNITY_UI_ALPHACLIP
+                clip(color.a - 0.001);
+                #endif
+                
+                return color;
             }
             
             ENDCG
